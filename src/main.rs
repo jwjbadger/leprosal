@@ -1,5 +1,5 @@
 use esp_idf_hal::{
-    gpio::{self, PinDriver, Pull},
+    gpio::{self, PinDriver, Pull, Pin},
     peripheral::Peripheral,
     peripherals::Peripherals,
     task::notification::Notification,
@@ -7,10 +7,14 @@ use esp_idf_hal::{
 };
 use std::num::NonZeroU32;
 
-const REFRESH_RATE: u64 = 64;
+const REFRESH_RATE: u64 = 64 /* * 300*/;
 
 struct Charlieplex<'a> {
-    pins: Vec<PinDriver<'a, gpio::AnyIOPin, gpio::InputOutput>>,
+    //pins: Vec<PinDriver<'a, gpio::AnyIOPin, gpio::InputOutput>>,
+    pins: Vec<i32>,
+    low: Option<PinDriver<'a, gpio::AnyIOPin, gpio::Output>>,
+    high: Option<PinDriver<'a, gpio::AnyIOPin, gpio::Output>>,
+    floating: Vec<PinDriver<'a, gpio::AnyIOPin, gpio::Input>>,
     reference: &'a [bool],
     layout: (usize, usize),
     index: usize,
@@ -54,17 +58,21 @@ impl<'a> Charlieplex<'a> {
             panic!("Number of pins does not match the layout dimensions.");
         }
 
-        let pins = pins
+        let (floating, pins): (Vec<PinDriver<'a, gpio::AnyIOPin, gpio::Input>>, Vec<i32>) = pins
             .into_iter()
             .map(|pin| {
-                let mut pin = PinDriver::input_output(pin).unwrap();
+                let mut pin = PinDriver::input(pin).unwrap();
+                let num = pin.pin();
                 pin.set_pull(Pull::Floating).unwrap();
-                pin
+                (pin, num)
             })
-            .collect::<Vec<PinDriver<_, _>>>();
+            .unzip();
 
         Charlieplex {
             pins,
+            floating,
+            low: None,
+            high: None,
             layout,
             reference,
             index: 0,
@@ -80,27 +88,63 @@ impl<'a> Charlieplex<'a> {
     }
 
     fn step(&mut self) {
-        self.pins[self.index % self.layout.0]
-            .set_pull(Pull::Floating)
-            .unwrap();
-        self.pins[(self.index / self.layout.0) + self.layout.0]
-            .set_pull(Pull::Floating)
-            .unwrap();
+        if let Some(high) = self.high.take() {
+            let mut high = high.into_input().unwrap();
+            high.set_pull(Pull::Floating).unwrap();
+            self.floating.insert(0, high);
+        };
 
+        if let Some(low) = self.low.take() {
+            let mut low = low.into_input().unwrap();
+            low.set_pull(Pull::Floating).unwrap();
+            self.floating.insert(0, low);
+        };
+         
+
+        self.index += 1;
         while !self.reference[self.index] {
-            self.index += 1;
+            if self.index == self.layout.0 * self.layout.1 - 1 {
+                self.index = 0;
+            } else {
+                self.index += 1;
+            }
         }
 
-        self.pins[(self.index / self.layout.0) + self.layout.0]
-            .set_low()
-            .unwrap();
-        self.pins[self.index % self.layout.0].set_high().unwrap();
+        let high = self.pins[(self.index / self.layout.0) + self.layout.0];
+        let low = self.pins[self.index % self.layout.0];
+
+        let mut to_be_high = 0;
+        let mut to_be_low = 0;
+        for (i, pin) in self.floating.iter().enumerate() {
+            if pin.pin() == high {
+                to_be_high = i;
+            } else if pin.pin() == low {
+                to_be_low = i;
+            }
+            if to_be_high != 0 && to_be_low != 0 {
+                break;
+            }
+        }
+
+        let high = self.floating.remove(to_be_high);
+        self.high = Some(high.into_output().unwrap());
+        self.high.as_mut().unwrap().set_high().unwrap();
+
+        let low = self.floating.remove(if to_be_high > to_be_low { to_be_low } else { to_be_low - 1});
+        self.low = Some(low.into_output().unwrap());
+        self.high.as_mut().unwrap().set_low().unwrap();
+
+        //println!("setting pin {} high and {} low", self.index % self.layout.0, (self.index / self.layout.0) + self.layout.0);
     }
 }
 
 fn main() {
     esp_idf_svc::sys::link_patches();
-    esp_idf_svc::log::EspLogger::initialize_default();
+    //esp_idf_svc::log::EspLogger::initialize_default();
+    
+    unsafe {
+        esp_idf_sys::esp_task_wdt_deinit();
+    }
 
     let peripherals = Peripherals::take().unwrap();
     let mut timer_driver = TimerDriver::new(
