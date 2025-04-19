@@ -5,16 +5,16 @@ use esp_idf_hal::{
     task::notification::Notification,
     timer::{self, TimerDriver},
 };
+use esp_idf_sys::*;
 use std::num::NonZeroU32;
 
-const REFRESH_RATE: u64 = 64 /* * 300*/;
+const REFRESH_RATE: u64 = 64 * 300;
 
 struct Charlieplex<'a> {
     //pins: Vec<PinDriver<'a, gpio::AnyIOPin, gpio::InputOutput>>,
     pins: Vec<i32>,
-    low: Option<PinDriver<'a, gpio::AnyIOPin, gpio::Output>>,
-    high: Option<PinDriver<'a, gpio::AnyIOPin, gpio::Output>>,
-    floating: Vec<PinDriver<'a, gpio::AnyIOPin, gpio::Input>>,
+    low: i32,
+    high: i32,
     reference: &'a [bool],
     layout: (usize, usize),
     index: usize,
@@ -34,19 +34,19 @@ const A: [bool; 64] = [
 
 #[rustfmt::skip]
 const B: [bool; 64] = [
-    false, false, true, true, true, true, true, true,
-    false, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, true, true,
-    true, true, true, true, true, true, false, true,
-    true, true, true, true, true, true, true, false,
+    true, true, true, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, true, true, true, false, false, false, false,
+    true, false, false, false, false, false, false, false,
+    true, false, false, false, false, false, false, false,
+    true, false, false, false, false, false, false, false,
+    true, false, false, false, false, false, false, false,
 ];
 
 impl<'a> Charlieplex<'a> {
     fn new(
-        pins: impl IntoIterator<Item = gpio::AnyIOPin>,
+        pins: impl IntoIterator<Item = i32>,
         reference: &'a [bool],
         layout: (impl Into<usize>, impl Into<usize>),
     ) -> Self {
@@ -58,21 +58,25 @@ impl<'a> Charlieplex<'a> {
             panic!("Number of pins does not match the layout dimensions.");
         }
 
-        let (floating, pins): (Vec<PinDriver<'a, gpio::AnyIOPin, gpio::Input>>, Vec<i32>) = pins
-            .into_iter()
-            .map(|pin| {
-                let mut pin = PinDriver::input(pin).unwrap();
-                let num = pin.pin();
-                pin.set_pull(Pull::Floating).unwrap();
-                (pin, num)
-            })
-            .unzip();
+        unsafe {
+            let mut config = gpio_config_t {
+                pin_bit_mask: 0,     // bitmask for GPIO pin
+                mode: gpio_mode_t_GPIO_MODE_INPUT,
+                pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
+                pull_down_en: gpio_pulldown_t_GPIO_PULLDOWN_DISABLE,
+                intr_type: gpio_int_type_t_GPIO_INTR_DISABLE,
+            };
+
+            for pin in pins.iter() {
+                config.pin_bit_mask = 1u64 << pin;
+                gpio_config(&mut config);
+            }
+        }
 
         Charlieplex {
             pins,
-            floating,
-            low: None,
-            high: None,
+            low: -1,
+            high: -1,
             layout,
             reference,
             index: 0,
@@ -88,18 +92,22 @@ impl<'a> Charlieplex<'a> {
     }
 
     fn step(&mut self) {
-        if let Some(high) = self.high.take() {
-            let mut high = high.into_input().unwrap();
-            high.set_pull(Pull::Floating).unwrap();
-            self.floating.insert(0, high);
-        };
+        if self.high > 0 && self.low > 0 {
+            unsafe {
+                let mut config = gpio_config_t {
+                    pin_bit_mask: 1u64 << self.high,     // bitmask for GPIO pin
+                    mode: gpio_mode_t_GPIO_MODE_INPUT,
+                    pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
+                    pull_down_en: gpio_pulldown_t_GPIO_PULLDOWN_DISABLE,
+                    intr_type: gpio_int_type_t_GPIO_INTR_DISABLE,
+                };
 
-        if let Some(low) = self.low.take() {
-            let mut low = low.into_input().unwrap();
-            low.set_pull(Pull::Floating).unwrap();
-            self.floating.insert(0, low);
-        };
-         
+                gpio_config(&mut config);
+
+                config.pin_bit_mask = 1u64 << self.low;
+                gpio_config(&mut config);
+            }
+        }
 
         self.index += 1;
         while !self.reference[self.index] {
@@ -110,29 +118,26 @@ impl<'a> Charlieplex<'a> {
             }
         }
 
-        let high = self.pins[(self.index / self.layout.0) + self.layout.0];
-        let low = self.pins[self.index % self.layout.0];
+        self.high = self.pins[(self.index / self.layout.0) + self.layout.0];
+        self.low = self.pins[self.index % self.layout.0];
 
-        let mut to_be_high = 0;
-        let mut to_be_low = 0;
-        for (i, pin) in self.floating.iter().enumerate() {
-            if pin.pin() == high {
-                to_be_high = i;
-            } else if pin.pin() == low {
-                to_be_low = i;
-            }
-            if to_be_high != 0 && to_be_low != 0 {
-                break;
-            }
+        unsafe {
+            let mut config = gpio_config_t {
+                pin_bit_mask: 1u64 << self.high,     // bitmask for GPIO pin
+                mode: gpio_mode_t_GPIO_MODE_OUTPUT,
+                pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
+                pull_down_en: gpio_pulldown_t_GPIO_PULLDOWN_DISABLE,
+                intr_type: gpio_int_type_t_GPIO_INTR_DISABLE,
+            };
+
+            gpio_config(&mut config);
+
+            config.pin_bit_mask = 1u64 << self.low;
+            gpio_config(&mut config);
+
+            gpio_set_level(self.high, 1);
+            gpio_set_level(self.low, 0);
         }
-
-        let high = self.floating.remove(to_be_high);
-        self.high = Some(high.into_output().unwrap());
-        self.high.as_mut().unwrap().set_high().unwrap();
-
-        let low = self.floating.remove(if to_be_high > to_be_low { to_be_low } else { to_be_low - 1});
-        self.low = Some(low.into_output().unwrap());
-        self.high.as_mut().unwrap().set_low().unwrap();
 
         //println!("setting pin {} high and {} low", self.index % self.layout.0, (self.index / self.layout.0) + self.layout.0);
     }
@@ -141,20 +146,20 @@ impl<'a> Charlieplex<'a> {
 fn main() {
     esp_idf_svc::sys::link_patches();
     //esp_idf_svc::log::EspLogger::initialize_default();
-    
+
     unsafe {
         esp_idf_sys::esp_task_wdt_deinit();
     }
 
     let peripherals = Peripherals::take().unwrap();
-    let mut timer_driver = TimerDriver::new(
+    /*let mut timer_driver = TimerDriver::new(
         peripherals.timer00,
         &timer::config::Config {
             auto_reload: true,
             ..Default::default()
         },
     )
-    .unwrap();
+        .unwrap();
 
     let notification = Notification::new();
     let notifier = notification.notifier();
@@ -168,40 +173,40 @@ fn main() {
             .subscribe(move || {
                 notifier.notify_and_yield(NonZeroU32::new(0b1011111011101111).unwrap());
             })
-            .unwrap();
-    }
+        .unwrap();
+        }
 
     timer_driver.enable_interrupt().unwrap();
     timer_driver.enable_alarm(true).unwrap();
-    timer_driver.enable(true).unwrap();
+    timer_driver.enable(true).unwrap();*/
 
     let mut grid = Charlieplex::new(
         [
-            peripherals.pins.gpio15.into(),
-            peripherals.pins.gpio2.into(),
-            peripherals.pins.gpio4.into(),
-            peripherals.pins.gpio5.into(),
-            peripherals.pins.gpio18.into(),
-            peripherals.pins.gpio19.into(),
-            peripherals.pins.gpio21.into(),
-            peripherals.pins.gpio22.into(),
-            peripherals.pins.gpio23.into(),
-            peripherals.pins.gpio13.into(),
-            peripherals.pins.gpio12.into(),
-            peripherals.pins.gpio14.into(),
-            peripherals.pins.gpio27.into(),
-            peripherals.pins.gpio26.into(),
-            peripherals.pins.gpio25.into(),
-            peripherals.pins.gpio33.into(),
+        15,
+        2,
+        4,
+        5,
+        18,
+        19,
+        21,
+        22,
+        23,
+        13,
+        12,
+        14,
+        27,
+        26,
+        25,
+        33,
         ],
         &B,
         (8usize, 8usize),
-    );
+        );
 
-    loop {
-        let bitset = notification.wait(esp_idf_hal::delay::BLOCK).unwrap();
-        if bitset == NonZeroU32::new(0xbeef).unwrap() {
-            grid.step();
+        loop {
+            //let bitset = notification.wait(esp_idf_hal::delay::BLOCK).unwrap();
+            //if bitset == NonZeroU32::new(0xbeef).unwrap() {
+                grid.step();
+            //}
         }
-    }
 }
