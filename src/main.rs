@@ -20,28 +20,54 @@ struct Charlieplex<'a> {
     index: usize,
 }
 
-#[rustfmt::skip]
-const A: [bool; 64] = [
-    false, false, false, false, false, false, false, false,
-    false, false, true, false, true, false, false, false,
-    false, false, false, false, false, false, false, false,
-    false, false, true, false, true, false, false, false,
-    false, false, false, true, false, false, false, false,
-    false, false, false, false, false, false, false, false,
-    false, false, false, false, false, false, false, false,
-    false, false, false, false, false, false, false, false,
-];
+const BITSET: NonZeroU32 = NonZeroU32::new(0xbeef).unwrap();
 
 #[rustfmt::skip]
-const B: [bool; 64] = [
-    true, true, true, true, false, false, false, false,
+const MESSAGE: [[bool; 64]; 5] = [
+    [true, true, true, true, false, false, false, false,
     true, false, false, true, false, false, false, false,
     true, false, false, true, false, false, false, false,
     true, true, true, true, false, false, false, false,
     true, false, false, false, false, false, false, false,
     true, false, false, false, false, false, false, false,
     true, false, false, false, false, false, false, false,
-    true, false, false, false, false, false, false, false,
+    true, false, false, false, false, false, false, false,],
+
+    [true, true, true, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, true, true, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, false, true, false, false, false,
+    true, false, false, false, false, true, false, false,
+    true, false, false, false, false, true, false, false,],
+
+    [true, true, true, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, true, true, true, false, false, false, false,],
+
+    [true, true, true, true, true, true, true, true,
+    true, false, false, true, true, false, false, true,
+    true, false, false, true, true, false, false, true,
+    true, false, false, true, true, false, false, true,
+    true, false, false, true, true, false, false, true,
+    true, false, false, false, false, false, false, true,
+    true, false, false, false, false, false, false, true,
+    true, false, false, false, false, false, false, true,],
+
+    [true, true, true, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    true, false, false, true, false, false, false, false,
+    false, false, true, true, false, false, false, false,
+    false, false, true, false, false, false, false, false,
+    false, false, true, false, false, false, false, false,
+    false, false, false, false, false, false, false, false,
+    false, false, true, false, false, false, false, false,],
 ];
 
 impl<'a> Charlieplex<'a> {
@@ -61,15 +87,21 @@ impl<'a> Charlieplex<'a> {
         unsafe {
             let mut config = gpio_config_t {
                 pin_bit_mask: 0,     // bitmask for GPIO pin
-                mode: gpio_mode_t_GPIO_MODE_INPUT,
+                mode: gpio_mode_t_GPIO_MODE_OUTPUT,
                 pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
                 pull_down_en: gpio_pulldown_t_GPIO_PULLDOWN_DISABLE,
                 intr_type: gpio_int_type_t_GPIO_INTR_DISABLE,
             };
 
-            for pin in pins.iter() {
+            for (i, pin) in pins.iter().enumerate() {
                 config.pin_bit_mask = 1u64 << pin;
                 gpio_config(&mut config);
+
+                if i < 8 {
+                    gpio_set_level(*pin, 1);
+                } else {
+                    gpio_set_level(*pin, 0);
+                }
             }
         }
 
@@ -94,7 +126,7 @@ impl<'a> Charlieplex<'a> {
     fn step(&mut self) {
         if self.high > 0 && self.low > 0 {
             unsafe {
-                let mut config = gpio_config_t {
+                /*let mut config = gpio_config_t {
                     pin_bit_mask: 1u64 << self.high,     // bitmask for GPIO pin
                     mode: gpio_mode_t_GPIO_MODE_INPUT,
                     pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
@@ -102,16 +134,18 @@ impl<'a> Charlieplex<'a> {
                     intr_type: gpio_int_type_t_GPIO_INTR_DISABLE,
                 };
 
-                gpio_config(&mut config);
+                gpio_config(&mut config);*/
 
-                config.pin_bit_mask = 1u64 << self.low;
-                gpio_config(&mut config);
+                //config.pin_bit_mask = 1u64 << self.low;
+                //gpio_config(&mut config);
+                gpio_set_level(self.high, 0);
+                gpio_set_level(self.low, 1);
             }
         }
 
         self.index += 1;
-        while !self.reference[self.index] {
-            if self.index == self.layout.0 * self.layout.1 - 1 {
+        while self.index > self.layout.0 * self.layout.1 - 1 || !self.reference[self.index] {
+            if self.index >= self.layout.0 * self.layout.1 - 1 {
                 self.index = 0;
             } else {
                 self.index += 1;
@@ -122,7 +156,7 @@ impl<'a> Charlieplex<'a> {
         self.low = self.pins[self.index % self.layout.0];
 
         unsafe {
-            let mut config = gpio_config_t {
+            /*let mut config = gpio_config_t {
                 pin_bit_mask: 1u64 << self.high,     // bitmask for GPIO pin
                 mode: gpio_mode_t_GPIO_MODE_OUTPUT,
                 pull_up_en: gpio_pullup_t_GPIO_PULLUP_DISABLE,
@@ -133,7 +167,7 @@ impl<'a> Charlieplex<'a> {
             gpio_config(&mut config);
 
             config.pin_bit_mask = 1u64 << self.low;
-            gpio_config(&mut config);
+            gpio_config(&mut config);*/
 
             gpio_set_level(self.high, 1);
             gpio_set_level(self.low, 0);
@@ -152,7 +186,7 @@ fn main() {
     }
 
     let peripherals = Peripherals::take().unwrap();
-    /*let mut timer_driver = TimerDriver::new(
+    let mut timer_driver = TimerDriver::new(
         peripherals.timer00,
         &timer::config::Config {
             auto_reload: true,
@@ -165,31 +199,31 @@ fn main() {
     let notifier = notification.notifier();
 
     timer_driver
-        .set_alarm(timer_driver.tick_hz() / REFRESH_RATE)
+        .set_alarm(timer_driver.tick_hz() * 2)
         .unwrap();
 
     unsafe {
         timer_driver
             .subscribe(move || {
-                notifier.notify_and_yield(NonZeroU32::new(0b1011111011101111).unwrap());
+                notifier.notify_and_yield(BITSET);
             })
         .unwrap();
         }
 
     timer_driver.enable_interrupt().unwrap();
     timer_driver.enable_alarm(true).unwrap();
-    timer_driver.enable(true).unwrap();*/
+    timer_driver.enable(true).unwrap();
 
     let mut grid = Charlieplex::new(
         [
-        15,
-        2,
-        4,
-        5,
-        18,
-        19,
-        21,
         22,
+        21,
+        19,
+        18,
+        5,
+        4,
+        2,
+        15,
         23,
         13,
         12,
@@ -199,14 +233,31 @@ fn main() {
         25,
         33,
         ],
-        &B,
+        &MESSAGE[0],
         (8usize, 8usize),
         );
 
+        let mut index: usize = 0;
+
         loop {
-            //let bitset = notification.wait(esp_idf_hal::delay::BLOCK).unwrap();
+            let bitset = notification.wait(esp_idf_hal::delay::NON_BLOCK);
             //if bitset == NonZeroU32::new(0xbeef).unwrap() {
-                grid.step();
+            match bitset {
+                Some(BITSET) => {
+                    if index == 4 {
+                        index = 0;
+                    } else {
+                        index += 1;
+                    }
+                    grid.reference(&MESSAGE[index]);
+                },
+                None => {
+                    grid.step();
+                },
+                _ => {
+                    panic!("unexpected notification");
+                }
+            }
             //}
         }
 }
