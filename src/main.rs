@@ -28,6 +28,18 @@ const A: [bool; 64] = [
     false, false, false, false, false, false, false, false,
 ];
 
+#[rustfmt::skip]
+const B: [bool; 64] = [
+    false, false, true, true, true, true, true, true,
+    false, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, true, true,
+    true, true, true, true, true, true, false, true,
+    true, true, true, true, true, true, true, false,
+];
+
 impl<'a> Charlieplex<'a> {
     fn new(
         pins: impl IntoIterator<Item = gpio::AnyIOPin>,
@@ -121,24 +133,24 @@ fn main() {
 
     let mut grid = Charlieplex::new(
         [
+            peripherals.pins.gpio15.into(),
             peripherals.pins.gpio2.into(),
             peripherals.pins.gpio4.into(),
             peripherals.pins.gpio5.into(),
-            peripherals.pins.gpio13.into(),
-            peripherals.pins.gpio14.into(),
-            peripherals.pins.gpio15.into(),
-            peripherals.pins.gpio16.into(),
-            peripherals.pins.gpio17.into(),
             peripherals.pins.gpio18.into(),
             peripherals.pins.gpio19.into(),
             peripherals.pins.gpio21.into(),
             peripherals.pins.gpio22.into(),
             peripherals.pins.gpio23.into(),
-            peripherals.pins.gpio25.into(),
-            peripherals.pins.gpio26.into(),
+            peripherals.pins.gpio13.into(),
+            peripherals.pins.gpio12.into(),
+            peripherals.pins.gpio14.into(),
             peripherals.pins.gpio27.into(),
+            peripherals.pins.gpio26.into(),
+            peripherals.pins.gpio25.into(),
+            peripherals.pins.gpio33.into(),
         ],
-        &A,
+        &B,
         (8usize, 8usize),
     );
 
