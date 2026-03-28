@@ -1,6 +1,6 @@
-# LED Promposal (Leprosal)
+# LED Prose 
 
-This is a simple charlieplexed LED matrix with a total of 64 LEDs controlled by and ESP32-WROOM microcontroller. Note that LEDs are disable by reversing their polarity rather than turning to high-impedence mode because making such a transition involves high overhead in the esp-idf-hal library due to the required recreation of the `PinDriver` struct.
+This is a simple charlieplexed LED matrix with a variable number of LEDs controlled by an ESP32-WROOM microcontroller. Messages with titles can be played by interacting with multiple buttons. Note that LEDs are disable by reversing their polarity rather than turning to high-impedence mode because making such a transition involves high overhead in the esp-idf-hal library due to the required recreation of the `PinDriver` struct.
 
 The setup can be seen below:
 

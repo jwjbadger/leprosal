@@ -399,5 +399,7 @@ fn main() {
             message_player.previous();
             previous.enable_interrupt().unwrap();
         }
+
+        reference = message_player.cut_window();
     }
 }
