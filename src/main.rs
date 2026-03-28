@@ -49,7 +49,7 @@ impl Charlieplex {
 
             for (i, pin) in pins.iter().enumerate() {
                 config.pin_bit_mask = 1u64 << pin;
-                gpio_config(&mut config);
+                gpio_config(&config);
 
                 if i < 8 {
                     gpio_set_level(*pin, 1);
@@ -120,8 +120,8 @@ where
     [(); N * (((M + N) & !N) + N)]:,
 {
     messages: Vec<(String, String)>,
-    message_index: usize, // which message
-    window_index: usize, // which character
+    message_index: usize,          // which message
+    window_index: usize,           // which character
     window_internal_offset: usize, // offset within character
     state: MessageState,
     window: [bool; N * (((M + N) & !N) + N)], // sized to 1 character past the width of the board
@@ -159,7 +159,7 @@ where
         let mut msg_bit_coded = [0u16; N * (((M + N) & !N) + N)];
 
         msg.iter().enumerate().for_each(|(i, char)| {
-            msg_bit_coded[i] = *self.alphabet.get(&char).unwrap();
+            msg_bit_coded[i] = *self.alphabet.get(char).unwrap();
         });
 
         for i in 0..self.layout.0 {
@@ -245,7 +245,7 @@ where
     }
 
     fn previous(&mut self) {
-        if self.message_index <= 0 {
+        if self.message_index == 0 {
             self.message_index = self.messages.len();
         }
 
